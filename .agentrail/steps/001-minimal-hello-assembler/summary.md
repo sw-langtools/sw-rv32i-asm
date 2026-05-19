@@ -1,0 +1,1 @@
+Added a minimal RV32I assembler crate for the hello-world MVP, supporting addi, sb, ebreak, registers/ABI aliases, decimal/hex literals, comments, and offset(base) operands while emitting through sw-rv32i-isa encode_word.
