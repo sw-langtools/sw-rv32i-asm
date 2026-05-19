@@ -1,0 +1,8 @@
+number = 1
+slug = "minimal-hello-assembler"
+status = "pending"
+description = "Create the minimal sw-rv32i-asm crate needed for a hello-world MVP. Add Cargo..."
+role = "production"
+context_files = []
+created_at = "2026-05-19T09:00:02"
+commits = []
