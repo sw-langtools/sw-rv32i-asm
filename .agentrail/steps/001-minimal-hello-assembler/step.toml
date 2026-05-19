@@ -1,6 +1,6 @@
 number = 1
 slug = "minimal-hello-assembler"
-status = "pending"
+status = "in-progress"
 description = "Create the minimal sw-rv32i-asm crate needed for a hello-world MVP. Add Cargo..."
 role = "production"
 context_files = []

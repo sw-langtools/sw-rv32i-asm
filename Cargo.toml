@@ -1,0 +1,9 @@
+[package]
+name = "sw-rv32i-asm"
+version = "0.1.0"
+edition = "2024"
+description = "RV32I assembler MVP: source to instruction bytes"
+license = "MIT"
+
+[dependencies]
+sw-rv32i-isa = { path = "../sw-rv32i-isa" }
