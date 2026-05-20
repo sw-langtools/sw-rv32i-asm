@@ -17,26 +17,30 @@ pub fn assemble_with_profile(source: &str, profile: IsaProfile) -> Result<Vec<u8
         if line.is_empty() {
             continue;
         }
-        let insn = parse_instruction(line).map_err(|kind| AsmError { line_no, kind })?;
-        profile.validate_instruction(insn).map_err(|_| AsmError {
-            line_no,
-            kind: AsmErrorKind::ProfileViolation,
-        })?;
-        let word = encode_word(insn).map_err(|_| AsmError {
-            line_no,
-            kind: AsmErrorKind::InvalidOperands,
-        })?;
-        bytes.extend_from_slice(&word.to_le_bytes());
+        let insns = parse_instruction(line).map_err(|kind| AsmError { line_no, kind })?;
+        for insn in insns {
+            profile.validate_instruction(insn).map_err(|_| AsmError {
+                line_no,
+                kind: AsmErrorKind::ProfileViolation,
+            })?;
+            let word = encode_word(insn).map_err(|_| AsmError {
+                line_no,
+                kind: AsmErrorKind::InvalidOperands,
+            })?;
+            bytes.extend_from_slice(&word.to_le_bytes());
+        }
     }
     Ok(bytes)
 }
 
-fn parse_instruction(line: &str) -> Result<Instruction, AsmErrorKind> {
+fn parse_instruction(line: &str) -> Result<Vec<Instruction>, AsmErrorKind> {
     let (mnemonic, rest) = split_mnemonic(line)?;
     match mnemonic {
-        "addi" => parse_addi(rest),
-        "sb" => parse_sb(rest),
-        "ebreak" if rest.trim().is_empty() => Ok(Instruction::Ebreak),
+        "addi" => Ok(vec![parse_addi(rest)?]),
+        "li" => parse_li(rest),
+        "sb" => Ok(vec![parse_store(rest, StoreWidth::Byte)?]),
+        "sw" => Ok(vec![parse_store(rest, StoreWidth::Word)?]),
+        "ebreak" if rest.trim().is_empty() => Ok(vec![Instruction::Ebreak]),
         "ebreak" => Err(AsmErrorKind::WrongOperandCount),
         _ => Err(AsmErrorKind::UnsupportedMnemonic),
     }
@@ -51,18 +55,56 @@ fn parse_addi(rest: &str) -> Result<Instruction, AsmErrorKind> {
         op: ImmOp::Addi,
         rd: parse_reg(operands[0])?,
         rs1: parse_reg(operands[1])?,
-        imm: parse_literal(operands[2])?,
+        imm: parse_i32_literal(operands[2])?,
     })
 }
 
-fn parse_sb(rest: &str) -> Result<Instruction, AsmErrorKind> {
+fn parse_li(rest: &str) -> Result<Vec<Instruction>, AsmErrorKind> {
+    let operands = split_operands(rest);
+    if operands.len() != 2 {
+        return Err(AsmErrorKind::WrongOperandCount);
+    }
+    let rd = parse_reg(operands[0])?;
+    let value = parse_u32_literal(operands[1])?;
+    Ok(load_const(rd, value))
+}
+
+fn load_const(rd: Reg, value: u32) -> Vec<Instruction> {
+    if fits_signed_12(value as i32) {
+        return vec![Instruction::OpImm {
+            op: ImmOp::Addi,
+            rd,
+            rs1: Reg::X0,
+            imm: value as i32,
+        }];
+    }
+
+    let hi = value.wrapping_add(0x800) & 0xffff_f000;
+    let lo = value.wrapping_sub(hi) as i32;
+    let mut insns = vec![Instruction::Lui { rd, imm: hi as i32 }];
+    if lo != 0 {
+        insns.push(Instruction::OpImm {
+            op: ImmOp::Addi,
+            rd,
+            rs1: rd,
+            imm: lo,
+        });
+    }
+    insns
+}
+
+fn fits_signed_12(value: i32) -> bool {
+    (-2048..=2047).contains(&value)
+}
+
+fn parse_store(rest: &str, width: StoreWidth) -> Result<Instruction, AsmErrorKind> {
     let operands = split_operands(rest);
     if operands.len() != 2 {
         return Err(AsmErrorKind::WrongOperandCount);
     }
     let (offset, base) = parse_offset_base(operands[1])?;
     Ok(Instruction::Store {
-        width: StoreWidth::Byte,
+        width,
         rs1: base,
         rs2: parse_reg(operands[0])?,
         offset,
@@ -91,7 +133,7 @@ fn parse_offset_base(text: &str) -> Result<(i32, Reg), AsmErrorKind> {
     if close != text.len() - 1 || close < open {
         return Err(AsmErrorKind::InvalidMemoryOperand);
     }
-    let offset = parse_literal(text[..open].trim())?;
+    let offset = parse_i32_literal(text[..open].trim())?;
     let base = parse_reg(text[open + 1..close].trim())?;
     Ok((offset, base))
 }
@@ -100,7 +142,11 @@ fn parse_reg(text: &str) -> Result<Reg, AsmErrorKind> {
     Reg::from_str(text).map_err(|_| AsmErrorKind::InvalidRegister)
 }
 
-fn parse_literal(text: &str) -> Result<i32, AsmErrorKind> {
+fn parse_i32_literal(text: &str) -> Result<i32, AsmErrorKind> {
+    Ok(parse_u32_literal(text)? as i32)
+}
+
+fn parse_u32_literal(text: &str) -> Result<u32, AsmErrorKind> {
     let text = text.trim();
     if text.is_empty() {
         return Err(AsmErrorKind::InvalidLiteral);
@@ -109,13 +155,17 @@ fn parse_literal(text: &str) -> Result<i32, AsmErrorKind> {
         .strip_prefix('-')
         .map_or((false, text), |rest| (true, rest));
     let value = if let Some(hex) = digits.strip_prefix("0x") {
-        i32::from_str_radix(hex, 16).map_err(|_| AsmErrorKind::InvalidLiteral)?
+        u32::from_str_radix(hex, 16).map_err(|_| AsmErrorKind::InvalidLiteral)?
     } else {
         digits
-            .parse::<i32>()
+            .parse::<u32>()
             .map_err(|_| AsmErrorKind::InvalidLiteral)?
     };
-    Ok(if negative { -value } else { value })
+    if negative {
+        Ok((0u32).wrapping_sub(value))
+    } else {
+        Ok(value)
+    }
 }
 
 fn strip_comment(line: &str) -> &str {
@@ -266,6 +316,91 @@ mod tests {
                 rs1: Reg::X0,
                 imm: 42,
             }]
+        );
+    }
+
+    #[test]
+    fn supports_li_pseudo_instruction_for_small_and_full_width_constants() {
+        let bytes = assemble(
+            r#"
+            li x1, 42
+            li x2, 0x60000000
+            li x3, 0x40013800
+            "#,
+        )
+        .unwrap();
+
+        assert_eq!(
+            decode_all(&bytes),
+            vec![
+                Instruction::OpImm {
+                    op: ImmOp::Addi,
+                    rd: Reg::X1,
+                    rs1: Reg::X0,
+                    imm: 42,
+                },
+                Instruction::Lui {
+                    rd: Reg::X2,
+                    imm: 0x6000_0000,
+                },
+                Instruction::Lui {
+                    rd: Reg::X3,
+                    imm: 0x4001_4000,
+                },
+                Instruction::OpImm {
+                    op: ImmOp::Addi,
+                    rd: Reg::X3,
+                    rs1: Reg::X3,
+                    imm: -2048,
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn supports_word_stores_for_mmio_programs() {
+        let bytes = assemble(
+            r#"
+            li x1, 0x60000000
+            li x2, 0x68
+            sw x2, 0(x1)
+            ebreak
+            "#,
+        )
+        .unwrap();
+
+        assert_eq!(
+            decode_all(&bytes),
+            vec![
+                Instruction::Lui {
+                    rd: Reg::X1,
+                    imm: 0x6000_0000,
+                },
+                Instruction::OpImm {
+                    op: ImmOp::Addi,
+                    rd: Reg::X2,
+                    rs1: Reg::X0,
+                    imm: 0x68,
+                },
+                Instruction::Store {
+                    width: StoreWidth::Word,
+                    rs1: Reg::X1,
+                    rs2: Reg::X2,
+                    offset: 0,
+                },
+                Instruction::Ebreak,
+            ]
+        );
+    }
+
+    #[test]
+    fn li_pseudo_instruction_is_profile_checked_after_expansion() {
+        assert_eq!(
+            assemble_with_profile("li x16, 1", IsaProfile::RV32E).unwrap_err(),
+            AsmError {
+                line_no: 1,
+                kind: AsmErrorKind::ProfileViolation,
+            }
         );
     }
 
