@@ -1,0 +1,8 @@
+number = 2
+slug = "emulator-consume-isa-profiles"
+status = "pending"
+description = "Update sw-rv32i-emulator to consume IsaProfile from sw-rv32i-isa. Add a run/s..."
+role = "legacy"
+context_files = []
+created_at = "2026-05-19T17:36:32"
+commits = []

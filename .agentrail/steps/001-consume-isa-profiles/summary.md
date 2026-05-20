@@ -1,0 +1,1 @@
+Added assemble_with_profile using the shared IsaProfile validator, kept assemble defaulting to RV32I, and covered RV32E high-register rejection plus RV32I hello-world compatibility.

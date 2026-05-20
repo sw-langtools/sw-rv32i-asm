@@ -1,0 +1,1 @@
+Update sw-rv32i-emulator to consume IsaProfile from sw-rv32i-isa. Add a run/step entry point that accepts a profile, keep existing APIs defaulting to RV32I, validate decoded instructions against the selected profile before execution, and add tests showing RV32E rejects an instruction using x16-x31 while RV32I keeps running the existing hello-world MVP.
