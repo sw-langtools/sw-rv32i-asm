@@ -3,9 +3,13 @@
 use std::fmt;
 use std::str::FromStr;
 
-use sw_rv32i_isa::{ImmOp, Instruction, Reg, StoreWidth, encode_word};
+use sw_rv32i_isa::{ImmOp, Instruction, IsaProfile, Reg, StoreWidth, encode_word};
 
 pub fn assemble(source: &str) -> Result<Vec<u8>, AsmError> {
+    assemble_with_profile(source, IsaProfile::RV32I)
+}
+
+pub fn assemble_with_profile(source: &str, profile: IsaProfile) -> Result<Vec<u8>, AsmError> {
     let mut bytes = Vec::new();
     for (line_index, raw_line) in source.lines().enumerate() {
         let line_no = line_index + 1;
@@ -14,6 +18,10 @@ pub fn assemble(source: &str) -> Result<Vec<u8>, AsmError> {
             continue;
         }
         let insn = parse_instruction(line).map_err(|kind| AsmError { line_no, kind })?;
+        profile.validate_instruction(insn).map_err(|_| AsmError {
+            line_no,
+            kind: AsmErrorKind::ProfileViolation,
+        })?;
         let word = encode_word(insn).map_err(|_| AsmError {
             line_no,
             kind: AsmErrorKind::InvalidOperands,
@@ -143,6 +151,7 @@ pub enum AsmErrorKind {
     InvalidLiteral,
     InvalidMemoryOperand,
     InvalidOperands,
+    ProfileViolation,
 }
 
 impl fmt::Display for AsmErrorKind {
@@ -155,6 +164,7 @@ impl fmt::Display for AsmErrorKind {
             AsmErrorKind::InvalidLiteral => "invalid literal",
             AsmErrorKind::InvalidMemoryOperand => "invalid memory operand",
             AsmErrorKind::InvalidOperands => "invalid operands",
+            AsmErrorKind::ProfileViolation => "instruction is not legal for selected ISA profile",
         };
         f.write_str(message)
     }
@@ -203,6 +213,46 @@ mod tests {
         let bytes = assemble(HELLO_SOURCE).unwrap();
         assert_eq!(bytes.len(), 13 * 4);
         assert_eq!(decode_all(&bytes).last(), Some(&Instruction::Ebreak));
+    }
+
+    #[test]
+    fn assemble_defaults_to_rv32i_profile() {
+        let bytes = assemble("addi x31, x0, 1").unwrap();
+        assert_eq!(
+            decode_all(&bytes),
+            vec![Instruction::OpImm {
+                op: ImmOp::Addi,
+                rd: Reg::X31,
+                rs1: Reg::X0,
+                imm: 1,
+            }]
+        );
+    }
+
+    #[test]
+    fn assemble_with_profile_rejects_rv32e_high_registers() {
+        assert_eq!(
+            assemble_with_profile("addi x16, x0, 1", IsaProfile::RV32E).unwrap_err(),
+            AsmError {
+                line_no: 1,
+                kind: AsmErrorKind::ProfileViolation,
+            }
+        );
+        assert_eq!(
+            assemble_with_profile("sb x1, 0(x31)", IsaProfile::RV32E).unwrap_err(),
+            AsmError {
+                line_no: 1,
+                kind: AsmErrorKind::ProfileViolation,
+            }
+        );
+    }
+
+    #[test]
+    fn assemble_with_profile_accepts_rv32i_hello_world() {
+        assert_eq!(
+            assemble_with_profile(HELLO_SOURCE, IsaProfile::RV32I).unwrap(),
+            assemble(HELLO_SOURCE).unwrap()
+        );
     }
 
     #[test]

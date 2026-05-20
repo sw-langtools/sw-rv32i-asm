@@ -1,6 +1,6 @@
 number = 1
 slug = "consume-isa-profiles"
-status = "pending"
+status = "in-progress"
 description = "Update sw-rv32i-asm to consume the shared IsaProfile API from sw-rv32i-isa. A..."
 role = "production"
 context_files = []
