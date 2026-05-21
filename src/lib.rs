@@ -3,7 +3,7 @@
 use std::fmt;
 use std::str::FromStr;
 
-use sw_rv32i_isa::{ImmOp, Instruction, IsaProfile, Reg, StoreWidth, encode_word};
+use sw_rv32i_isa::{ImmOp, Instruction, IsaProfile, LoadWidth, Reg, StoreWidth, encode_word};
 
 pub fn assemble(source: &str) -> Result<Vec<u8>, AsmError> {
     assemble_with_profile(source, IsaProfile::RV32I)
@@ -38,6 +38,7 @@ fn parse_instruction(line: &str) -> Result<Vec<Instruction>, AsmErrorKind> {
     match mnemonic {
         "addi" => Ok(vec![parse_addi(rest)?]),
         "li" => parse_li(rest),
+        "lw" => Ok(vec![parse_load(rest, LoadWidth::Word)?]),
         "sb" => Ok(vec![parse_store(rest, StoreWidth::Byte)?]),
         "sw" => Ok(vec![parse_store(rest, StoreWidth::Word)?]),
         "ebreak" if rest.trim().is_empty() => Ok(vec![Instruction::Ebreak]),
@@ -107,6 +108,20 @@ fn parse_store(rest: &str, width: StoreWidth) -> Result<Instruction, AsmErrorKin
         width,
         rs1: base,
         rs2: parse_reg(operands[0])?,
+        offset,
+    })
+}
+
+fn parse_load(rest: &str, width: LoadWidth) -> Result<Instruction, AsmErrorKind> {
+    let operands = split_operands(rest);
+    if operands.len() != 2 {
+        return Err(AsmErrorKind::WrongOperandCount);
+    }
+    let (offset, base) = parse_offset_base(operands[1])?;
+    Ok(Instruction::Load {
+        width,
+        rd: parse_reg(operands[0])?,
+        rs1: base,
         offset,
     })
 }
@@ -387,6 +402,35 @@ mod tests {
                     rs1: Reg::X1,
                     rs2: Reg::X2,
                     offset: 0,
+                },
+                Instruction::Ebreak,
+            ]
+        );
+    }
+
+    #[test]
+    fn supports_word_loads_for_mmio_programs() {
+        let bytes = assemble(
+            r#"
+            li x1, 0x60004000
+            lw x3, 8(x1)
+            ebreak
+            "#,
+        )
+        .unwrap();
+
+        assert_eq!(
+            decode_all(&bytes),
+            vec![
+                Instruction::Lui {
+                    rd: Reg::X1,
+                    imm: 0x6000_4000,
+                },
+                Instruction::Load {
+                    width: LoadWidth::Word,
+                    rd: Reg::X3,
+                    rs1: Reg::X1,
+                    offset: 8,
                 },
                 Instruction::Ebreak,
             ]

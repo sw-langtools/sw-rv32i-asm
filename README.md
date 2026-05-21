@@ -8,6 +8,7 @@ MVP work starts with a deliberately small subset for hello-world and MMIO demos:
 
 - `addi rd, rs1, imm`
 - `li rd, imm`, expanding to `addi` or `lui`/`addi`
+- `lw rd, offset(rs1)`
 - `sb rs2, offset(rs1)`
 - `sw rs2, offset(rs1)`
 - `ebreak`
